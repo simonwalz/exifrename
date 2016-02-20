@@ -41,4 +41,3 @@ License: GPL v2
 
 Copyright Simon Walz, 2013
 
-## Al
