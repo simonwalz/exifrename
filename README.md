@@ -27,6 +27,14 @@ Command to correct all EXIF timestamps:
 exiftool "-AllDates-=0:0:0 1:05:26" -overwrite_original .
 ```
 
+## exifrotate
+
+This repository contains an addional script to rotate pictures using their EXIF orientation flag.
+
+```sh
+exifrotate [files.jpg]
+```
+
 ## Alternatives
 
 Use exiftool with the following parameters (see [exiftool documentation](http://www.sno.phy.queensu.ca/~phil/exiftool/filename.html))
