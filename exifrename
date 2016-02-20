@@ -1,0 +1,281 @@
+#!/usr/bin/perl -w
+#
+# exifrename - a perl script to rename pictures.
+# Copyright (C) 2008-2013 Simon Walz, http://sw.nerdbox.de/
+#
+# This program is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the
+# Free Software Foundation; either version 2 of the License, or (at your
+# option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+# more details.
+# 
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin St, Fifth Floor, Boston, MA 02110, USA
+
+use strict;
+#require 5.004;
+
+use Getopt::Long;
+
+#use lib '/opt/local/lib/perl5/vendor_perl/5.8.8';
+use Image::ExifTool qw(:Public);
+
+sub getFN;
+sub getExt;
+sub getRealName;
+sub isFile;
+sub isInDB;
+sub addToDB;
+sub renamefile;
+
+
+my ($dbfile, $help, $test);
+my $append = "";
+
+# default format:
+my $format = "%Y_%m_%d-%H_%M_%S";
+
+my $results = GetOptions(
+	"db=s" => \$dbfile,
+	"append=s" => \$append,
+	"help" => \$help,
+	"format=s" => \$format,
+	"test" => \$test
+);
+
+my @files = ();
+if (defined($ARGV[0]) and $ARGV[0] eq "-") {
+	while(<STDIN>) {
+		push(@files, $_);
+	}
+} else {
+	@files = @ARGV;
+}
+
+if (!(scalar @files) or defined($help)) {
+	print STDERR "Usage: exifrename [-db dbfile] [-append append] ".
+				"[-format format] [-test] files\n";
+	print <<EOF;
+Example: exifrename *.JPG *.THM
+-db dbfile - File with list of already used filenames
+             (new filenames will be added)
+
+-append s  - String or char to be added to the filename
+
+-format fm - Format of the new base filename (like unix function date)
+             (default: %Y_%m_%d-%H_%M_%S)
+
+-test      - test, no action
+-          - Get files form STDIN
+
+(c) Simon Walz, 2008-2013, http://sw.nerdbox.de/
+EOF
+
+	exit(2);
+}
+
+if (defined($dbfile)) {
+	if (!-f $dbfile) {
+		print STDERR "!!! db-file not found.\n";
+		exit(2);
+	} else {
+		print STDERR "+++ db-file: ".$dbfile."\n";
+	}
+}
+
+# process all files:
+foreach my $filename (@files) {
+	renamefile($filename, $dbfile, $append, $format, $test);
+}
+
+
+
+### Functions:
+
+# process $filename
+# rename all files with the same basename (filename without extension)
+sub renamefile {
+	my $filename = shift;
+	my $dbfile = shift;
+	my $append = shift;
+	my $format = shift;
+	my $test = shift;
+
+	if (-d $filename) {
+		print STDERR "!!! Dir \"".$filename."\" ignored.\n";
+		return;
+	} elsif (!-f $filename) {
+		print STDERR "!!! File \"".$filename."\" not found.\n";
+		return;
+	}
+
+	my $fn = getFN($filename, $format);
+	# Error: no EXIF data in file
+	return if (!defined($fn));
+
+	my $realname = getRealName($filename);
+	# Error: no filename extension
+	return if (!defined($realname));
+	
+	# check, if a character has to be added:
+	while (isFile($fn.$append) or isInDB($dbfile, $fn.$append)) {
+		if ($realname eq $fn.$append) {
+			print STDERR "--- New and old name are ".
+						"the same (".$realname.")\n";
+			return;
+		}
+		if ($append eq "") {
+			$append = "a";
+		} else {
+			# increment the last character:
+			$append++;
+		}
+	}
+	$fn .= $append;
+	
+	addToDB($dbfile, $fn) if (!defined($test));
+	
+	# glob() reagiert auf Sterne und Leerzeichen.
+	# Deshalb müssen Leerzeichen ersetzt werden.
+	my $filesearch = $realname.'.*';
+	$filesearch =~ s/ /\\ /g;
+	foreach my $f (glob($filesearch)) {
+		my $fext = getExt($f);
+		if (defined($fext)) {
+			print $f . " --> " . $fn.".".$fext."\n";
+			if (defined($test)) {
+				print "rename ".$f." ".$fn.".".$fext."\n";
+			} else {
+				rename($f, $fn.".".$fext);
+			}
+		} else {
+			print STDERR "--- Filename \"".$f."\" has no ".
+				"extension.\n";
+		}
+	}
+	
+	# panorama picture:
+	if ($filename =~ /^ST([A-Z])/) {
+		open(PANORAMA, '>>', 'panorama.txt') or
+				die ("Could not append to 'panorama.txt'\n");
+		my $fext = getExt($filename);
+		if (defined($fext)) {
+			print PANORAMA $1." ".$fn.$fext;
+		}
+		print STDERR "+++ panorama picture: \"".$fn.$fext."\"\n";
+		close(PANORAMA) or die ("Could not write \"panorama.txt\"\n");
+	}
+}
+
+# get the new file-basename in defined time format
+sub getFN {
+	my $file = shift;
+	my $format = shift; # default: %Y_%m_%d-%H_%M_%S
+
+	if (!defined($format) or $format eq "") {
+		die "!!! format of new filename not defined.\n";
+	}
+
+	# Use executeable version of exiftool:
+	#my $fn = `exiftool -CreateDate -S -d "$format" "$file"`;
+	#$fn =~ s/^CreateDate: //;
+
+	my $exifTool = new Image::ExifTool;
+	$exifTool->Options(DateFormat => $format);
+	my $info = $exifTool->ImageInfo($file, 'CreateDate');
+	if (!defined($info->{'CreateDate'})) {
+		print STDERR "--- No EXIF-data in file \"".$file."\" found.\n";
+		return undef;
+	}
+	my $fn = $info->{'CreateDate'}."\n";
+	chomp($fn);
+
+	return undef if ($fn eq "");
+	return $fn;
+}
+
+# get the extension of the file:
+sub getExt {
+	my $file = shift;
+	if ($file =~ /\.([^.]+?)$/) {
+		$file = $1;
+		$file = lc $file;
+		return $file;
+	}
+
+	# Error Filename has no extension.
+	return undef;
+}
+
+# get the basename of the file:
+sub getRealName {
+	my $file = shift;
+	# cut off the extension:
+	$file =~ s/\.(.*?)$//;
+	# if there is no extension -- ignore the file:
+	if (!defined($1)) {
+		print STDERR "--- Filename \"".$file."\" has no extension.\n";
+		return undef;
+	}
+
+	return $file;
+}
+
+# check, if there is a file with the same basename:
+sub isFile {
+	my $name = shift;
+	my $other = "";
+	$name .= '.*';
+	$name =~ s/ /\\ /g;
+	my @a = glob($name);
+	foreach my $f (@a) {
+		$other .= $f;
+	}
+	return 0 if ($other eq "");
+	return 1;
+}
+
+# check, if the filename is in the db-file:
+sub isInDB {
+	my $dbfile = shift;
+	my $name = shift;
+
+	if (!defined($dbfile) or ! -f $dbfile) {
+		return 0;
+	}
+
+	open(DB, "<", $dbfile) or die("Could not open DB.\n");
+	while(<DB>) {
+		chomp;
+		s/\..*?$//;
+		if ($_ eq $name) {
+			print STDERR "+++ Found in DB: ".$name."\n";
+			close(DB);
+			return 1;
+		}
+	}
+	close(DB);
+	return 0;
+}
+
+# add a filename to the db-file:
+sub addToDB {
+	my $dbfile = shift;
+	my $name = shift;
+
+	if (!defined($dbfile) or ! -f $dbfile) {
+		return 0;
+	}
+
+	open(DB, ">>", $dbfile) or die("Could not open db-file for writing.\n");
+	print DB $name."\n";
+	close(DB) or die ("Could not write db-file.\n");
+	return 1;
+}
+
+
