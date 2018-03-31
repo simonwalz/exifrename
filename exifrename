@@ -139,6 +139,12 @@ sub renamefile {
 	$fn .= $append;
 	
 	addToDB($dbfile, $fn) if (!defined($test));
+
+	# if the file is "marked" with _m by the user or an other program
+	# keep this string:
+	if ($realname =~ /_m$/i) {
+		$fn .= "_m";
+	}
 	
 	# glob() reagiert auf Sterne und Leerzeichen.
 	# Deshalb müssen Leerzeichen ersetzt werden.
