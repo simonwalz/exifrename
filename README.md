@@ -43,9 +43,3 @@ Use exiftool with the following parameters (see [exiftool documentation](http://
 exiftool -d %Y_%m_%d-%H_%M_%S%%-c.%%e "-filename<CreateDate" .
 ```
 
-## License
-
-License: GPL v2
-
-Copyright Simon Walz, 2013
-
