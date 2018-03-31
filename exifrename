@@ -222,7 +222,8 @@ sub getExt {
 sub getRealName {
 	my $file = shift;
 	# cut off the extension:
-	$file =~ s/\.(.*?)$//;
+	$file =~ s/\.([^.\/\\]+?)$//;
+
 	# if there is no extension -- ignore the file:
 	if (!defined($1)) {
 		print STDERR "--- Filename \"".$file."\" has no extension.\n";
